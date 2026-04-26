@@ -4,18 +4,32 @@ Terraform infrastructure for deploying the [RXNT marketing site](https://github.
 
 ## Architecture
 
-```
-                        ┌─────────────────────────────┐
-                        │       Azure (Central US)     │
-                        │                              │
-   GitHub Actions  ───► │  ACR  ──►  AKS              │
-   (prod deploys)       │            └─ site container │
-                        │            └─ api container  │
-   Local terraform ───► │                              │
-   (dev deploys)        │  Azure SQL  ◄─ api           │
-                        │  Redis      ◄─ site          │
-                        │  Key Vault  ◄─ both          │
-                        └─────────────────────────────┘
+```mermaid
+graph LR
+    GHA["GitHub Actions\n(prod deploys)"]
+    DEV["Local Terraform\n(dev deploys)"]
+
+    subgraph azure["Azure — Central US"]
+        ACR["ACR"]
+
+        subgraph aks["AKS"]
+            site["site container"]
+            api["api container"]
+        end
+
+        SQL[("Azure SQL")]
+        Redis[("Redis")]
+        KV["Key Vault"]
+    end
+
+    GHA -- "push images" --> ACR
+    GHA -- "terraform apply" --> azure
+    DEV -- "terraform apply" --> azure
+    ACR -- "image pull" --> aks
+    api --> SQL
+    site --> Redis
+    site --> KV
+    api --> KV
 ```
 
 **Two containerized services:**
@@ -114,6 +128,8 @@ az storage account create \
 az storage container create --name tfstate --account-name rxntterraformstate
 ```
 
+The storage account is intentionally created in East US rather than Central US (the infrastructure region). This keeps it independent of the infrastructure it tracks — if you destroy or migrate an environment, the state is unaffected. It also lives in its own resource group (`rg-terraform-state`) outside of Terraform's management so `terraform destroy` can never touch it.
+
 Then uncomment the `backend "azurerm"` block in `environments/prod/providers.tf` and run `terraform init` once to migrate state.
 
 **2. Add a federated credential to the Service Principal**
@@ -143,9 +159,33 @@ In your repo: **Settings → Secrets and variables → Actions → New repositor
 
 No `client_secret` is needed — the federated credential handles authentication via OIDC token exchange.
 
-**4. Push to trigger the workflow**
+**4. Configure the prod environment with a required reviewer**
+
+In your repo: **Settings → Environments → New environment** → name it `prod` → add yourself (or a teammate) as a required reviewer.
+
+This creates a manual approval gate on the apply job — merging to main triggers the plan automatically, but apply pauses and waits for a human to approve before any infrastructure changes run.
+
+**5. Push to trigger the workflow**
 
 The workflow runs on any push or PR that changes `environments/prod/**` or `modules/**`.
+
+On a **pull request**: the `Plan` job runs and posts the Terraform plan as a comment.
+
+On **merge to main**: the `Plan` job runs first, then the `Apply` job pauses for reviewer approval. Once approved, it applies the exact plan that was reviewed — not a fresh one.
+
+## Destroying Infrastructure
+
+A separate manually-triggered workflow handles destroy so it can never run accidentally.
+
+**Actions → Terraform Destroy → Run workflow**, then:
+
+1. Select the environment (`dev` or `prod`)
+2. Type `destroy` in the confirmation field
+3. Click **Run workflow**
+
+The job aborts immediately if the confirmation input is anything other than `destroy`.
+
+The `prod` environment required reviewer (configured in step 4 above) also applies here — a second person must approve before the destroy job executes against prod.
 
 ## Build and Push Images
 

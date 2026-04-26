@@ -12,21 +12,18 @@ terraform {
     }
   }
 
-  # Remote state for prod. Run `terraform init` after creating the storage account.
+  # Uncomment and run `terraform init -migrate-state` to enable remote state.
   backend "azurerm" {
     resource_group_name  = "rg-terraform-state"
     storage_account_name = "rxntterraformstate"
     container_name       = "tfstate"
-    key                  = "prod/terraform.tfstate"
+    key                  = "dev/terraform.tfstate"
   }
 }
 
 provider "azurerm" {
   features {}
 
-  # use_oidc lets CI authenticate via Workload Identity Federation.
-  # When ARM_USE_OIDC=true and ARM_* vars are set, client_secret is not needed.
-  use_oidc        = true
   subscription_id = var.subscription_id
   client_id       = var.client_id
   client_secret   = var.client_secret
