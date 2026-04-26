@@ -1,0 +1,4 @@
+subscription_id = "<your-subscription-id>"
+client_id       = "<service-principal-client-id>"
+client_secret   = "<service-principal-client-secret>"
+tenant_id       = "<your-tenant-id>"

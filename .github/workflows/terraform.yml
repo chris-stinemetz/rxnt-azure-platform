@@ -1,0 +1,96 @@
+name: Terraform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "environments/prod/**"
+      - "modules/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "environments/prod/**"
+      - "modules/**"
+
+permissions:
+  id-token: write      # required for OIDC token exchange
+  contents: read
+  pull-requests: write # required to post plan comments
+
+jobs:
+  terraform:
+    name: Plan / Apply
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: environments/prod
+
+    # Auth via OIDC — no client_secret stored in GitHub.
+    # Requires a federated credential configured on the SP for this repo/branch.
+    # Set these three as GitHub Actions secrets (Settings → Secrets → Actions):
+    #   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+    env:
+      ARM_USE_OIDC:       "true"
+      ARM_CLIENT_ID:      ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID:      ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.14"
+
+      - name: Format check
+        run: terraform fmt -check -recursive ../../
+
+      - name: Init
+        run: terraform init
+        # Prerequisite: remote state storage account must exist.
+        # Bootstrap once with:
+        #   az group create --name rg-terraform-state --location eastus
+        #   az storage account create --name rxntterraformstate \
+        #     --resource-group rg-terraform-state --location eastus --sku Standard_LRS
+        #   az storage container create --name tfstate --account-name rxntterraformstate
+        # Then uncomment the backend block in environments/prod/providers.tf and re-init.
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        id: plan
+        run: terraform plan -no-color -out=tfplan
+        continue-on-error: true
+
+      - name: Post plan to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const outcome = '${{ steps.plan.outcome }}';
+            const planOutput = `${{ steps.plan.outputs.stdout }}`.slice(0, 60000);
+            const body = [
+              `#### Terraform Plan \`${{ steps.plan.outcome }}\``,
+              '<details><summary>Show Plan</summary>',
+              '',
+              '```terraform',
+              planOutput,
+              '```',
+              '</details>',
+            ].join('\n');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Fail if plan failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -auto-approve tfplan

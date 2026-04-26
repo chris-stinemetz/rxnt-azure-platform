@@ -1,0 +1,20 @@
+# Ignore files and directories
+.ignore
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!*.tfvars.example
+
+# Secrets
+*.env
+.env*
+
+# macOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
