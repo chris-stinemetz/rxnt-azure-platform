@@ -13,12 +13,12 @@ terraform {
   }
 
   # Remote state for prod. Run `terraform init` after creating the storage account.
-  # backend "azurerm" {
-  #   resource_group_name  = "rg-terraform-state"
-  #   storage_account_name = "rxntterraformstate"
-  #   container_name       = "tfstate"
-  #   key                  = "prod/terraform.tfstate"
-  # }
+  backend "azurerm" {
+    resource_group_name  = "rg-terraform-state"
+    storage_account_name = "rxntterraformstate"
+    container_name       = "tfstate"
+    key                  = "prod/terraform.tfstate"
+  }
 }
 
 provider "azurerm" {

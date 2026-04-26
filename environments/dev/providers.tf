@@ -13,12 +13,12 @@ terraform {
   }
 
   # Uncomment and run `terraform init -migrate-state` to enable remote state.
-  # backend "azurerm" {
-  #   resource_group_name  = "rg-terraform-state"
-  #   storage_account_name = "rxntterraformstate"
-  #   container_name       = "tfstate"
-  #   key                  = "dev/terraform.tfstate"
-  # }
+  backend "azurerm" {
+    resource_group_name  = "rg-terraform-state"
+    storage_account_name = "rxntterraformstate"
+    container_name       = "tfstate"
+    key                  = "dev/terraform.tfstate"
+  }
 }
 
 provider "azurerm" {

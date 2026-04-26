@@ -128,6 +128,8 @@ az storage account create \
 az storage container create --name tfstate --account-name rxntterraformstate
 ```
 
+The storage account is intentionally created in East US rather than Central US (the infrastructure region). This keeps it independent of the infrastructure it tracks — if you destroy or migrate an environment, the state is unaffected. It also lives in its own resource group (`rg-terraform-state`) outside of Terraform's management so `terraform destroy` can never touch it.
+
 Then uncomment the `backend "azurerm"` block in `environments/prod/providers.tf` and run `terraform init` once to migrate state.
 
 **2. Add a federated credential to the Service Principal**
