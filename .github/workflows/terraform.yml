@@ -17,23 +17,19 @@ permissions:
   contents: read
   pull-requests: write # required to post plan comments
 
+env:
+  ARM_USE_OIDC:        "true"
+  ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
 jobs:
-  terraform:
-    name: Plan / Apply
+  plan:
+    name: Plan
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: environments/prod
-
-    # Auth via OIDC — no client_secret stored in GitHub.
-    # Requires a federated credential configured on the SP for this repo/branch.
-    # Set these three as GitHub Actions secrets (Settings → Secrets → Actions):
-    #   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
-    env:
-      ARM_USE_OIDC:       "true"
-      ARM_CLIENT_ID:      ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_TENANT_ID:      ${{ secrets.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -47,13 +43,6 @@ jobs:
 
       - name: Init
         run: terraform init
-        # Prerequisite: remote state storage account must exist.
-        # Bootstrap once with:
-        #   az group create --name rg-terraform-state --location eastus
-        #   az storage account create --name rxntterraformstate \
-        #     --resource-group rg-terraform-state --location eastus --sku Standard_LRS
-        #   az storage container create --name tfstate --account-name rxntterraformstate
-        # Then uncomment the backend block in environments/prod/providers.tf and re-init.
 
       - name: Validate
         run: terraform validate
@@ -69,7 +58,6 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const outcome = '${{ steps.plan.outcome }}';
             const planOutput = `${{ steps.plan.outputs.stdout }}`.slice(0, 60000);
             const body = [
               `#### Terraform Plan \`${{ steps.plan.outcome }}\``,
@@ -91,6 +79,39 @@ jobs:
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
+      - name: Upload plan
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: environments/prod/tfplan
+          retention-days: 1
+
+  apply:
+    name: Apply
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: prod  # pauses for required reviewer approval before running
+    defaults:
+      run:
+        working-directory: environments/prod
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.14"
+
+      - name: Init
+        run: terraform init
+
+      - name: Download plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: environments/prod
+
       - name: Apply
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: terraform apply -auto-approve tfplan
