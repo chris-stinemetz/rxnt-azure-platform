@@ -6,11 +6,11 @@ Terraform infrastructure for deploying the [RXNT marketing site](https://github.
 
 ```mermaid
 graph TD
-    subgraph ci["GitHub Actions"]
-        TF["terraform.yml\ninfra CD"]
-        CD["deploy.yml\napp CD"]
+    subgraph sources["Deployment"]
+        TF["GitHub Actions\nterraform.yml"]
+        CD["GitHub Actions\ndeploy.yml"]
+        DEV["Local Terraform\ndev only"]
     end
-    DEV["Local Terraform\ndev deploys"]
 
     subgraph azure["Azure — Central US"]
         ACR["ACR"]
@@ -24,11 +24,11 @@ graph TD
         KV["Key Vault"]
     end
 
-    TF -- "terraform apply" --> azure
-    DEV -- "terraform apply" --> azure
+    TF --> azure
+    DEV --> azure
     CD -- "push images" --> ACR
     CD -- "helm upgrade" --> aks
-    ACR -- "image pull" --> aks
+    ACR --> aks
     api --> SQL
     site --> Redis
     CSI -- "read secrets" --> KV
