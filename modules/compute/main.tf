@@ -38,6 +38,10 @@ resource "azurerm_kubernetes_cluster" "main" {
     load_balancer_sku = "standard"
   }
 
+  key_vault_secrets_provider {
+    secret_rotation_enabled = false
+  }
+
   tags = var.common_tags
 }
 

@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: site
+  labels:
+    app: site
+    {{- include "marketing-site.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.site.replicaCount }}
+  selector:
+    matchLabels:
+      app: site
+  template:
+    metadata:
+      labels:
+        app: site
+    spec:
+      containers:
+        - name: site
+          image: "{{ .Values.image.siteRepository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: "Production"
+            - name: REDIS_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: REDIS_CONNECTION_STRING
+            - name: MarketingApi__BaseUrl
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: MarketingApi__BaseUrl
+          resources:
+            {{- toYaml .Values.site.resources | nindent 12 }}
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: app-secrets
