@@ -76,6 +76,10 @@ resource "azurerm_key_vault" "main" {
       "Purge",
     ]
   }
+
+  lifecycle {
+    ignore_changes = [access_policy]
+  }
 }
 
 resource "azurerm_key_vault_secret" "redis_connection_string" {

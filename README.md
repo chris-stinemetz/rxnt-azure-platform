@@ -253,7 +253,7 @@ helm upgrade --install marketing-site helm/marketing-site \
 
 **OIDC for CI authentication** — GitHub Actions authenticates to Azure via Workload Identity Federation. No long-lived `client_secret` is stored in GitHub secrets; the federated credential is scoped to a specific repo and branch.
 
-**Key Vault access policy model** — RBAC authorization disabled; the SP gets a direct access policy with only the required secret permissions (`Get`, `List`, `Set`, `Delete`, `Recover`, `Purge`).
+**Key Vault access policy model** — RBAC authorization disabled; the SP gets a direct access policy with only the required secret permissions (`Get`, `List`, `Set`, `Delete`, `Recover`, `Purge`). The SP policy is defined inline on the Key Vault resource (required to bootstrap secret creation in the same module), while the CSI driver policy is a separate `azurerm_key_vault_access_policy` resource in the environment. `lifecycle { ignore_changes = [access_policy] }` on the Key Vault prevents Terraform from treating the externally-managed CSI policy as drift and removing it on every plan.
 
 **Random suffixes for global uniqueness** — ACR, SQL Server, Redis, and Key Vault names require globally unique Azure names. A `random_string` suffix is appended to avoid collisions across deployments and forks.
 
