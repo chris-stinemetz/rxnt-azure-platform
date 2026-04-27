@@ -5,33 +5,33 @@ Terraform infrastructure for deploying the [RXNT marketing site](https://github.
 ## Architecture
 
 ```mermaid
-graph LR
-    GHA_TF["GitHub Actions\nterraform.yml"]
-    GHA_CD["GitHub Actions\ndeploy.yml"]
-    DEV["Local Terraform\n(dev deploys)"]
+graph TD
+    subgraph ci["GitHub Actions"]
+        TF["terraform.yml\ninfra CD"]
+        CD["deploy.yml\napp CD"]
+    end
+    DEV["Local Terraform\ndev deploys"]
 
     subgraph azure["Azure — Central US"]
         ACR["ACR"]
-
         subgraph aks["AKS"]
-            site["site container"]
-            api["api container"]
+            site["site"]
+            api["api"]
             CSI["CSI Driver"]
         end
-
         SQL[("Azure SQL")]
         Redis[("Redis")]
         KV["Key Vault"]
     end
 
-    GHA_TF -- "terraform apply" --> azure
+    TF -- "terraform apply" --> azure
     DEV -- "terraform apply" --> azure
-    GHA_CD -- "push images" --> ACR
-    GHA_CD -- "helm upgrade" --> aks
+    CD -- "push images" --> ACR
+    CD -- "helm upgrade" --> aks
     ACR -- "image pull" --> aks
-    CSI -- "read secrets" --> KV
     api --> SQL
     site --> Redis
+    CSI -- "read secrets" --> KV
 ```
 
 **Two containerized services:**
