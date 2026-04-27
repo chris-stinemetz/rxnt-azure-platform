@@ -70,7 +70,7 @@ variable "site_image_tag" {
 variable "api_base_url" {
   description = "Base URL the site uses to reach the API service."
   type        = string
-  default     = "http://api.default.svc.cluster.local"
+  default     = "http://api.marketing.svc.cluster.local"
 }
 
 variable "aks_node_count" {

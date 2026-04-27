@@ -212,6 +212,22 @@ The workflow:
 
 No values are hardcoded in the workflow — everything comes from Terraform state at deploy time.
 
+### Dev deployment
+
+Images are built once via the **Dev Deploy** GitHub Actions workflow (Actions → Dev Deploy → Run workflow). This builds on native amd64 runners and pushes to the dev ACR — no local Docker required.
+
+After images are built, deploy or redeploy the Helm chart locally:
+
+```bash
+# Deploy using the latest tag
+./scripts/deploy-dev.sh
+
+# Deploy a specific image tag
+./scripts/deploy-dev.sh <tag>
+```
+
+The script reads all values (ACR, AKS, Key Vault, CSI client ID) live from Terraform outputs — no secrets or credentials are exposed.
+
 ### Manual image build and deploy
 
 For local testing after `terraform apply`:

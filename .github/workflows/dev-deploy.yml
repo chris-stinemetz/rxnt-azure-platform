@@ -1,11 +1,6 @@
-name: Deploy
+name: Dev Deploy
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "helm/**"
-      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 permissions:
@@ -14,9 +9,9 @@ permissions:
 
 jobs:
   deploy:
-    name: Build & Deploy
+    name: Build & Deploy (dev)
     runs-on: ubuntu-latest
-    environment: prod
+    environment: dev
 
     steps:
       - name: Checkout platform repo
@@ -34,8 +29,8 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Terraform init (prod)
-        working-directory: environments/prod
+      - name: Terraform init (dev)
+        working-directory: environments/dev
         run: terraform init
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -45,7 +40,7 @@ jobs:
 
       - name: Read Terraform outputs
         id: tf
-        working-directory: environments/prod
+        working-directory: environments/dev
         run: |
           echo "acr=$(terraform output -raw acr_login_server)" >> "$GITHUB_OUTPUT"
           echo "aks=$(terraform output -raw aks_cluster_name)" >> "$GITHUB_OUTPUT"
