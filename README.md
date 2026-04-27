@@ -27,7 +27,7 @@ graph TD
     TF --> azure
     DEV --> azure
     CD -- "push images" --> ACR
-    CD -- "helm upgrade" --> aks
+    CD --> aks
     ACR --> aks
     api --> SQL
     site --> Redis
