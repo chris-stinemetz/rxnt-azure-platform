@@ -52,3 +52,13 @@ module "data" {
   api_base_url        = var.api_base_url
   common_tags         = var.common_tags
 }
+
+data "azurerm_client_config" "current" {}
+
+resource "azurerm_key_vault_access_policy" "csi_driver" {
+  key_vault_id = module.data.key_vault_id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = module.compute.key_vault_secrets_provider_object_id
+
+  secret_permissions = ["Get", "List"]
+}

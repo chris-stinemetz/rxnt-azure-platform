@@ -6,7 +6,8 @@ Terraform infrastructure for deploying the [RXNT marketing site](https://github.
 
 ```mermaid
 graph LR
-    GHA["GitHub Actions\n(prod deploys)"]
+    GHA_TF["GitHub Actions\nterraform.yml"]
+    GHA_CD["GitHub Actions\ndeploy.yml"]
     DEV["Local Terraform\n(dev deploys)"]
 
     subgraph azure["Azure — Central US"]
@@ -15,6 +16,7 @@ graph LR
         subgraph aks["AKS"]
             site["site container"]
             api["api container"]
+            CSI["CSI Driver"]
         end
 
         SQL[("Azure SQL")]
@@ -22,14 +24,14 @@ graph LR
         KV["Key Vault"]
     end
 
-    GHA -- "push images" --> ACR
-    GHA -- "terraform apply" --> azure
+    GHA_TF -- "terraform apply" --> azure
     DEV -- "terraform apply" --> azure
+    GHA_CD -- "push images" --> ACR
+    GHA_CD -- "helm upgrade" --> aks
     ACR -- "image pull" --> aks
+    CSI -- "read secrets" --> KV
     api --> SQL
     site --> Redis
-    site --> KV
-    api --> KV
 ```
 
 **Two containerized services:**
@@ -56,13 +58,17 @@ graph LR
 modules/
   network/        VNet + subnets
   data/           SQL, Redis, Key Vault + secrets
-  compute/        AKS, ACR, AcrPull role assignment
+  compute/        AKS, ACR, AcrPull role assignment, CSI driver addon
 environments/
   dev/            Local apply — lightweight defaults (1 node)
   prod/           GitHub Actions deploy on merge to main (2 nodes)
+helm/
+  marketing-site/ Helm chart — site + api Deployments, Services, SecretProviderClass, HPA
 .github/
   workflows/
-    terraform.yml Plan on PR, apply on merge to main
+    terraform.yml          Plan on PR, apply on merge to main (infra)
+    deploy.yml             Build images + helm upgrade on merge to main (app)
+    terraform-destroy.yml  Manual destroy with confirmation gate
 ```
 
 ## Prerequisites
@@ -132,20 +138,26 @@ The storage account is intentionally created in East US rather than Central US (
 
 Then uncomment the `backend "azurerm"` block in `environments/prod/providers.tf` and run `terraform init` once to migrate state.
 
-**2. Add a federated credential to the Service Principal**
+**2. Add federated credentials to the Service Principal**
 
-In the Azure Portal, navigate to **App registrations → rxnt-assessment-sp → Certificates & secrets → Federated credentials → Add credential**:
+Three credentials are required — the OIDC subject claim differs between event types so a single credential cannot cover all cases.
 
-| Field | Value |
-|-------|-------|
-| Scenario | GitHub Actions |
-| Organization | your GitHub username |
-| Repository | `rxnt-azure-platform` |
-| Entity type | Branch |
-| Branch | `main` |
-| Name | `github-actions-prod-main` |
+In the Azure Portal, navigate to **App registrations → rxnt-assessment-sp → Certificates & secrets → Federated credentials → Add credential** and add all three:
 
-Leave Issuer and Audience at their defaults.
+| Field | Credential 1 | Credential 2 | Credential 3 |
+|-------|-------------|-------------|-------------|
+| Scenario | GitHub Actions | GitHub Actions | GitHub Actions |
+| Organization | your GitHub username | your GitHub username | your GitHub username |
+| Repository | `rxnt-azure-platform` | `rxnt-azure-platform` | `rxnt-azure-platform` |
+| Entity type | Pull request | Branch | Environment |
+| Branch / Environment | — | `main` | `prod` |
+| Name | `github-actions-pr` | `github-actions-main` | `github-actions-environment-prod` |
+
+Leave Issuer and Audience at their defaults for all three.
+
+- **Pull request** — Plan job on PR events
+- **Branch (main)** — Plan job when re-run on a merged commit
+- **Environment (prod)** — Apply job running in the `prod` GitHub Environment after approval
 
 **3. Add GitHub Actions secrets**
 
@@ -187,20 +199,44 @@ The job aborts immediately if the confirmation input is anything other than `des
 
 The `prod` environment required reviewer (configured in step 4 above) also applies here — a second person must approve before the destroy job executes against prod.
 
-## Build and Push Images
+## Application Deployment (CD)
 
-After `terraform apply`, push your container images to ACR:
+Application deployments — building images and deploying to AKS — are handled by `.github/workflows/deploy.yml`, which runs automatically on every merge to `main` that changes `helm/**` or the workflow file itself.
+
+The workflow:
+1. Authenticates to Azure via OIDC (same `prod` environment gate as the infra apply)
+2. Reads `acr_login_server`, `key_vault_name`, and `key_vault_secrets_provider_client_id` from Terraform remote state via `terraform output`
+3. Clones [RXNT/site-mkt](https://github.com/RXNT/site-mkt) and builds both images, tagged with `github.sha`
+4. Pushes images to ACR
+5. Runs `helm upgrade --install` with values populated from Terraform outputs
+
+No values are hardcoded in the workflow — everything comes from Terraform state at deploy time.
+
+### Manual image build and deploy
+
+For local testing after `terraform apply`:
 
 ```bash
 ACR=$(terraform -chdir=environments/dev output -raw acr_login_server)
+KV=$(terraform -chdir=environments/dev output -raw key_vault_name)
+CSI_CLIENT=$(terraform -chdir=environments/dev output -raw key_vault_secrets_provider_client_id)
+TENANT=$(az account show --query tenantId -o tsv)
 
 az acr login --name $ACR
 
 docker build -f Dockerfile.site -t $ACR/site:latest .
 docker push $ACR/site:latest
-
 docker build -f Dockerfile.api -t $ACR/api:latest .
 docker push $ACR/api:latest
+
+az aks get-credentials --resource-group rxnt-marketing-rg-dev --name rxntmktdev-aks
+
+helm upgrade --install marketing-site helm/marketing-site \
+  --set image.apiRepository=$ACR/api \
+  --set image.siteRepository=$ACR/site \
+  --set keyVault.name=$KV \
+  --set keyVault.tenantId=$TENANT \
+  --set keyVault.csiClientId=$CSI_CLIENT
 ```
 
 ## Design Decisions
@@ -209,6 +245,12 @@ docker push $ACR/api:latest
 
 **AcrPull via kubelet managed identity** — AKS pulls images from ACR using a system-assigned identity and role assignment. No registry credentials are stored anywhere.
 
+**CSI driver for secret injection** — The Secrets Store CSI Driver addon on AKS syncs Key Vault secrets to a Kubernetes secret (`app-secrets`). Pods mount a secrets-store volume to trigger the sync, then reference env vars from the K8s secret. No secrets touch the filesystem or environment at build time.
+
+**CSI access policy in the environment, not the module** — The CSI driver creates its own user-assigned managed identity (distinct from the kubelet identity). Granting it a Key Vault access policy requires a reference to both `module.compute` and `module.data` outputs, so it lives in the environment `main.tf` to avoid circular module dependencies.
+
+**Helm for app manifests, separate deploy.yml for CD** — The Terraform `helm` provider cannot reference AKS module outputs in its `provider` block (provider configs are evaluated before modules run). A separate `deploy.yml` workflow is the correct CD boundary: it builds images, reads Terraform outputs from remote state, and runs `helm upgrade`.
+
 **OIDC for CI authentication** — GitHub Actions authenticates to Azure via Workload Identity Federation. No long-lived `client_secret` is stored in GitHub secrets; the federated credential is scoped to a specific repo and branch.
 
 **Key Vault access policy model** — RBAC authorization disabled; the SP gets a direct access policy with only the required secret permissions (`Get`, `List`, `Set`, `Delete`, `Recover`, `Purge`).
@@ -216,5 +258,7 @@ docker push $ACR/api:latest
 **Random suffixes for global uniqueness** — ACR, SQL Server, Redis, and Key Vault names require globally unique Azure names. A `random_string` suffix is appended to avoid collisions across deployments and forks.
 
 **Explicit `depends_on` on subnets and SQL DB** — Azure's control plane can return success on parent resource creation while child API calls briefly 404. Targeted `depends_on` was added only after observing transient failures in real applies — not as a blanket pattern.
+
+**Remote state in East US, infra in Central US** — State storage is independent of the infrastructure it tracks and lives in its own resource group (`rg-terraform-state`) outside Terraform's management, so `terraform destroy` can never touch it.
 
 **Region: Central US** — East US and East US 2 both failed for this subscription (AKS node SKU rejection + SQL `ProvisioningDisabled`). Central US passed both checks; West US 3 is a confirmed fallback.

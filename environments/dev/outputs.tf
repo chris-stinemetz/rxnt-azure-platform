@@ -22,3 +22,8 @@ output "key_vault_name" {
   value       = module.data.key_vault_name
   description = "Key Vault name where application secrets are stored."
 }
+
+output "key_vault_secrets_provider_client_id" {
+  value       = module.compute.key_vault_secrets_provider_client_id
+  description = "Client ID of the CSI driver managed identity (referenced in SecretProviderClass)."
+}
