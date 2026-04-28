@@ -1,22 +1,26 @@
 variable "subscription_id" {
   description = "Azure subscription ID used by the provider."
   type        = string
+  default     = null
 }
 
 variable "client_id" {
   description = "Service Principal application (client) ID."
   type        = string
+  default     = null
 }
 
 variable "client_secret" {
   description = "Service Principal client secret."
   type        = string
   sensitive   = true
+  default     = null
 }
 
 variable "tenant_id" {
   description = "Azure AD tenant ID for the Service Principal."
   type        = string
+  default     = null
 }
 
 variable "location" {
