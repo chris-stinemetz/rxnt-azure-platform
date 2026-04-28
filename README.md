@@ -8,7 +8,7 @@ Terraform infrastructure for deploying the [RXNT marketing site](https://github.
 graph TD
     subgraph sources["Deployment"]
         TF["GitHub Actions\nterraform.yml"]
-        CD["GitHub Actions\ndeploy.yml"]
+        CD["scripts/deploy.sh"]
         DEV["Local Terraform\ndev only"]
     end
 
@@ -62,12 +62,19 @@ modules/
 environments/
   dev/            Local apply — lightweight defaults (1 node)
   prod/           GitHub Actions deploy on merge to main (2 nodes)
-helm/
-  marketing-site/ Helm chart — site + api Deployments, Services, SecretProviderClass, HPA
+k8s/
+  namespace.yaml            marketing namespace
+  secret-provider-class.yaml  CSI SecretProviderClass — syncs Key Vault secrets to K8s secret
+  api-deployment.yaml       API deployment (image, env vars, secrets-store volume mount)
+  api-service.yaml          ClusterIP — internal only
+  site-deployment.yaml      Site deployment (image, env vars, secrets-store volume mount)
+  site-service.yaml         LoadBalancer — external traffic
+  hpa.yaml                  HPA for both deployments (CPU 50%, 1–5 replicas)
+scripts/
+  deploy.sh                 Build images, push to ACR, envsubst manifests, kubectl apply
 .github/
   workflows/
     terraform.yml          Plan on PR, apply on merge to main (infra)
-    deploy.yml             Build images + helm upgrade on merge to main (app)
     terraform-destroy.yml  Manual destroy with confirmation gate
 ```
 
@@ -199,61 +206,29 @@ The job aborts immediately if the confirmation input is anything other than `des
 
 The `prod` environment required reviewer (configured in step 4 above) also applies here — a second person must approve before the destroy job executes against prod.
 
-## Application Deployment (CD)
+## Application Deployment
 
-Application deployments — building images and deploying to AKS — are handled by `.github/workflows/deploy.yml`, which runs automatically on every merge to `main` that changes `helm/**` or the workflow file itself.
-
-The workflow:
-1. Authenticates to Azure via OIDC (same `prod` environment gate as the infra apply)
-2. Reads `acr_login_server`, `key_vault_name`, and `key_vault_secrets_provider_client_id` from Terraform remote state via `terraform output`
-3. Clones [RXNT/site-mkt](https://github.com/RXNT/site-mkt) and builds both images, tagged with `github.sha`
-4. Pushes images to ACR
-5. Runs `helm upgrade --install` with values populated from Terraform outputs
-
-No values are hardcoded in the workflow — everything comes from Terraform state at deploy time.
-
-### Dev deployment
-
-Images are built once via the **Dev Deploy** GitHub Actions workflow (Actions → Dev Deploy → Run workflow). This builds on native amd64 runners and pushes to the dev ACR — no local Docker required.
-
-After images are built, deploy or redeploy the Helm chart locally:
+After `terraform apply`, deploy the application with `scripts/deploy.sh`. The script reads all required values from Terraform outputs at runtime — no credentials or names are hardcoded.
 
 ```bash
-# Deploy using the latest tag
-./scripts/deploy-dev.sh
-
-# Deploy a specific image tag
-./scripts/deploy-dev.sh <tag>
-```
-
-The script reads all values (ACR, AKS, Key Vault, CSI client ID) live from Terraform outputs — no secrets or credentials are exposed.
-
-### Manual image build and deploy
-
-For local testing after `terraform apply`:
-
-```bash
-ACR=$(terraform -chdir=environments/dev output -raw acr_login_server)
-KV=$(terraform -chdir=environments/dev output -raw key_vault_name)
-CSI_CLIENT=$(terraform -chdir=environments/dev output -raw key_vault_secrets_provider_client_id)
-TENANT=$(az account show --query tenantId -o tsv)
-
-az acr login --name $ACR
-
-docker build -f Dockerfile.site -t $ACR/site:latest .
-docker push $ACR/site:latest
-docker build -f Dockerfile.api -t $ACR/api:latest .
-docker push $ACR/api:latest
-
+# Get AKS credentials
 az aks get-credentials --resource-group rxnt-marketing-rg-dev --name rxntmktdev-aks
 
-helm upgrade --install marketing-site helm/marketing-site \
-  --set image.apiRepository=$ACR/api \
-  --set image.siteRepository=$ACR/site \
-  --set keyVault.name=$KV \
-  --set keyVault.tenantId=$TENANT \
-  --set keyVault.csiClientId=$CSI_CLIENT
+# Deploy (builds images, pushes to ACR, applies all k8s/ manifests)
+./scripts/deploy.sh dev latest
+
+# Deploy a specific git SHA tag
+./scripts/deploy.sh dev abc1234
 ```
+
+The script:
+1. Reads `acr_login_server`, `key_vault_name`, `tenant_id`, and `key_vault_secrets_provider_client_id` from `terraform output`
+2. Builds both Docker images for `linux/amd64` and pushes them to ACR
+3. Applies `k8s/namespace.yaml`
+4. Runs `envsubst` to substitute `${ACR}`, `${IMAGE_TAG}`, `${CSI_CLIENT_ID}`, `${KEY_VAULT_NAME}`, and `${KEY_VAULT_TENANT_ID}` into the manifests, then pipes each through `kubectl apply`
+5. Waits for both rollouts to complete and prints the site's external IP
+
+The Kubernetes manifests in `k8s/` use plain YAML with `envsubst` placeholders for environment-specific values. No Helm or templating engine is required.
 
 ## Open Items
 
@@ -270,7 +245,7 @@ helm upgrade --install marketing-site helm/marketing-site \
 
 **CSI access policy in the environment, not the module** — The CSI driver creates its own user-assigned managed identity (distinct from the kubelet identity). Granting it a Key Vault access policy requires a reference to both `module.compute` and `module.data` outputs, so it lives in the environment `main.tf` to avoid circular module dependencies.
 
-**Helm for app manifests, separate deploy.yml for CD** — The Terraform `helm` provider cannot reference AKS module outputs in its `provider` block (provider configs are evaluated before modules run). A separate `deploy.yml` workflow is the correct CD boundary: it builds images, reads Terraform outputs from remote state, and runs `helm upgrade`.
+**Plain K8s manifests with envsubst** — App manifests live in `k8s/` as plain YAML with `${VAR}` placeholders. `envsubst` substitutes environment-specific values (ACR login server, Key Vault name, CSI client ID) at deploy time, keeping the manifests readable and free of templating engine dependencies. `scripts/deploy.sh` reads all values from `terraform output` so nothing is hardcoded.
 
 **OIDC for CI authentication** — GitHub Actions authenticates to Azure via Workload Identity Federation. No long-lived `client_secret` is stored in GitHub secrets; the federated credential is scoped to a specific repo and branch.
 

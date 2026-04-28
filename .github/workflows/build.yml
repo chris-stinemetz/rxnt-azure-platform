@@ -1,0 +1,51 @@
+name: App — Build Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag (e.g. latest, git SHA)"
+        required: false
+        default: "latest"
+
+env:
+  ACR_NAME: rxntmktdeva9a6r3acr
+  ACR_LOGIN_SERVER: rxntmktdeva9a6r3acr.azurecr.io
+
+jobs:
+  build:
+    name: Build and push images
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout app source
+        uses: actions/checkout@v4
+        with:
+          repository: RXNT/site-mkt
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Build and push site image
+        run: |
+          docker build --platform linux/amd64 \
+            -f Dockerfile.site \
+            -t ${{ env.ACR_LOGIN_SERVER }}/site:${{ inputs.image_tag }} .
+          docker push ${{ env.ACR_LOGIN_SERVER }}/site:${{ inputs.image_tag }}
+
+      - name: Build and push api image
+        run: |
+          docker build --platform linux/amd64 \
+            -f Dockerfile.api \
+            -t ${{ env.ACR_LOGIN_SERVER }}/api:${{ inputs.image_tag }} .
+          docker push ${{ env.ACR_LOGIN_SERVER }}/api:${{ inputs.image_tag }}
