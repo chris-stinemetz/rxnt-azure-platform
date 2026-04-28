@@ -1,4 +1,4 @@
-name: Prod — Infra Plan / Apply
+name: Infra — Plan / Apply
 
 on:
   push:

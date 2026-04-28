@@ -1,4 +1,4 @@
-name: Dev — App Deploy
+name: App — Deploy (dev)
 
 on:
   workflow_dispatch:

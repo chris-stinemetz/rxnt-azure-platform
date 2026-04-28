@@ -1,4 +1,4 @@
-name: Prod — App Deploy
+name: App — Deploy (prod)
 
 on:
   push:

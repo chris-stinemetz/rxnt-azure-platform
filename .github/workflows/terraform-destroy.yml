@@ -1,4 +1,4 @@
-name: Prod — Infra Destroy
+name: Infra — Destroy
 
 on:
   workflow_dispatch:
