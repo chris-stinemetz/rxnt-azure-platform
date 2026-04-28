@@ -1,36 +1,43 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: api
-  labels:
-    app: api
-    {{- include "marketing-site.labels" . | nindent 4 }}
+  name: site
+  namespace: marketing
 spec:
-  replicas: {{ .Values.api.replicaCount }}
+  replicas: 1
   selector:
     matchLabels:
-      app: api
+      app: site
   template:
     metadata:
       labels:
-        app: api
+        app: site
     spec:
       containers:
-        - name: api
-          image: "{{ .Values.image.apiRepository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+        - name: site
+          image: "${ACR}/site:${IMAGE_TAG}"
           ports:
             - containerPort: 8080
           env:
             - name: ASPNETCORE_ENVIRONMENT
               value: "Production"
-            - name: DB_CONNECTION_STRING
+            - name: REDIS_CONNECTION_STRING
               valueFrom:
                 secretKeyRef:
                   name: app-secrets
-                  key: DB_CONNECTION_STRING
+                  key: REDIS_CONNECTION_STRING
+            - name: MarketingApi__BaseUrl
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: MarketingApi__BaseUrl
           resources:
-            {{- toYaml .Values.api.resources | nindent 12 }}
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
           volumeMounts:
             - name: secrets-store
               mountPath: /mnt/secrets-store

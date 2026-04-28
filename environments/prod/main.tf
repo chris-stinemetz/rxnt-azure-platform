@@ -1,9 +1,3 @@
-resource "random_string" "suffix" {
-  length  = 6
-  upper   = false
-  special = false
-}
-
 resource "random_password" "sql_admin_password" {
   length           = 24
   special          = true

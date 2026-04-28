@@ -1,6 +1,0 @@
-apiVersion: v2
-name: marketing-site
-description: RXNT marketing site — deploys the site (frontend) and api (backend) services.
-type: application
-version: 0.1.0
-appVersion: "latest"

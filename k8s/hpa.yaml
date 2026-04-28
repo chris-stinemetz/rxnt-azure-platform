@@ -2,42 +2,38 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: api
-  labels:
-    app: api
-    {{- include "marketing-site.labels" . | nindent 4 }}
+  namespace: marketing
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
     name: api
-  minReplicas: {{ .Values.hpa.minReplicas }}
-  maxReplicas: {{ .Values.hpa.maxReplicas }}
+  minReplicas: 1
+  maxReplicas: 5
   metrics:
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: {{ .Values.hpa.targetCPUUtilizationPercentage }}
+          averageUtilization: 50
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: site
-  labels:
-    app: site
-    {{- include "marketing-site.labels" . | nindent 4 }}
+  namespace: marketing
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
     name: site
-  minReplicas: {{ .Values.hpa.minReplicas }}
-  maxReplicas: {{ .Values.hpa.maxReplicas }}
+  minReplicas: 1
+  maxReplicas: 5
   metrics:
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: {{ .Values.hpa.targetCPUUtilizationPercentage }}
+          averageUtilization: 50

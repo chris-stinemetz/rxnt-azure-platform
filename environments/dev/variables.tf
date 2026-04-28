@@ -41,6 +41,12 @@ variable "name_prefix" {
   default     = "rxntmktdev"
 }
 
+variable "name_suffix" {
+  description = "Stable suffix appended to globally unique resource names (ACR, SQL, Redis, Key Vault). Fixed per environment to avoid name changes on destroy/re-apply."
+  type        = string
+  default     = "a9a6r3"
+}
+
 variable "sql_admin_username" {
   description = "Administrator username for Azure SQL Server."
   type        = string

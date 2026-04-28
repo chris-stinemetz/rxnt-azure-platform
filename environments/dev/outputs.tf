@@ -27,3 +27,8 @@ output "key_vault_secrets_provider_client_id" {
   value       = module.compute.key_vault_secrets_provider_client_id
   description = "Client ID of the CSI driver managed identity (referenced in SecretProviderClass)."
 }
+
+output "tenant_id" {
+  value       = data.azurerm_client_config.current.tenant_id
+  description = "Azure tenant ID (used in SecretProviderClass for Key Vault CSI driver)."
+}
