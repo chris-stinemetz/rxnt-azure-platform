@@ -8,6 +8,7 @@ Terraform infrastructure for deploying the [RXNT marketing site](https://github.
 graph TD
     subgraph sources["Deployment"]
         TF["GitHub Actions\nterraform.yml"]
+        BUILD["GitHub Actions\nbuild.yml"]
         CD["scripts/deploy.sh"]
         DEV["Local Terraform\ndev only"]
     end
@@ -26,7 +27,7 @@ graph TD
 
     TF --> azure
     DEV --> azure
-    CD -- "push images" --> ACR
+    BUILD -- "push images" --> ACR
     CD --> aks
     ACR --> aks
     api --> SQL
@@ -71,11 +72,12 @@ k8s/
   site-service.yaml         LoadBalancer — external traffic
   hpa.yaml                  HPA for both deployments (CPU 50%, 1–5 replicas)
 scripts/
-  deploy.sh                 Build images, push to ACR, envsubst manifests, kubectl apply
+  deploy.sh                 envsubst manifests, kubectl apply (set SKIP_BUILD=true to skip image build)
 .github/
   workflows/
     terraform.yml          Plan on PR, apply on merge to main (infra)
     terraform-destroy.yml  Manual destroy with confirmation gate
+    build.yml              Manually triggered — builds images on amd64 runners, pushes to ACR
 ```
 
 ## Prerequisites
@@ -208,31 +210,32 @@ The `prod` environment required reviewer (configured in step 4 above) also appli
 
 ## Application Deployment
 
-After `terraform apply`, deploy the application with `scripts/deploy.sh`. The script reads all required values from Terraform outputs at runtime — no credentials or names are hardcoded.
+Application deployment is a two-step process: build images in CI, then apply manifests to the cluster.
+
+**Step 1 — Build images (GitHub Actions)**
+
+**Actions → App — Build Images → Run workflow**, select the target environment and image tag. This builds both images on native `linux/amd64` runners and pushes them to the environment's ACR. No local Docker required.
+
+**Step 2 — Apply manifests**
 
 ```bash
 # Get AKS credentials
 az aks get-credentials --resource-group rxnt-marketing-rg-dev --name rxntmktdev-aks
 
-# Deploy (builds images, pushes to ACR, applies all k8s/ manifests)
-./scripts/deploy.sh dev latest
+# Apply manifests (images already in ACR from step 1)
+SKIP_BUILD=true ./scripts/deploy.sh dev latest
 
-# Deploy a specific git SHA tag
-./scripts/deploy.sh dev abc1234
+# Or build locally and deploy in one step (slow on Apple Silicon)
+./scripts/deploy.sh dev latest
 ```
 
-The script:
-1. Reads `acr_login_server`, `key_vault_name`, `tenant_id`, and `key_vault_secrets_provider_client_id` from `terraform output`
-2. Builds both Docker images for `linux/amd64` and pushes them to ACR
-3. Applies `k8s/namespace.yaml`
-4. Runs `envsubst` to substitute `${ACR}`, `${IMAGE_TAG}`, `${CSI_CLIENT_ID}`, `${KEY_VAULT_NAME}`, and `${KEY_VAULT_TENANT_ID}` into the manifests, then pipes each through `kubectl apply`
-5. Waits for both rollouts to complete and prints the site's external IP
+`deploy.sh` reads `acr_login_server`, `key_vault_name`, `tenant_id`, and `key_vault_secrets_provider_client_id` from `terraform output`, runs `envsubst` to substitute values into the `k8s/` manifests, and applies them with `kubectl`. Nothing is hardcoded.
 
 The Kubernetes manifests in `k8s/` use plain YAML with `envsubst` placeholders for environment-specific values. No Helm or templating engine is required.
 
 ## Open Items
 
-- **SP least-privilege (prod bootstrap)** — `User Access Administrator` is scoped to `rxnt-marketing-rg-dev` for dev. For prod, the role assignment can't be pre-scoped to the resource group before it exists. Remediation: pre-create the prod resource group, add the scoped assignment, then `terraform import` the group before the first apply. Until then, subscription-scope `User Access Administrator` is required as a one-time bootstrap.
+- **SP least-privilege** — The SP currently holds subscription-scope `User Access Administrator` to allow Terraform to create the AcrPull role assignment on the kubelet identity. This can be tightened post-deploy by scoping the role to the resource group, or replaced with a subscription-scope ABAC condition limiting it to assigning only the AcrPull role (`7f951dda-4ed3-4680-a7ca-43fe172d538d`).
 - **KEDA for time-window autoscaling** — HPA is in place with CPU-based scaling (50% target, 1–5 replicas). Adding KEDA with a cron scaler would pre-scale before the 10am–8pm EST traffic window rather than reacting to it after the fact.
 
 ## Design Decisions
@@ -251,7 +254,7 @@ The Kubernetes manifests in `k8s/` use plain YAML with `envsubst` placeholders f
 
 **Key Vault access policy model** — RBAC authorization disabled; the SP gets a direct access policy with only the required secret permissions (`Get`, `List`, `Set`, `Delete`, `Recover`, `Purge`). The SP policy is defined inline on the Key Vault resource (required to bootstrap secret creation in the same module), while the CSI driver policy is a separate `azurerm_key_vault_access_policy` resource in the environment. `lifecycle { ignore_changes = [access_policy] }` on the Key Vault prevents Terraform from treating the externally-managed CSI policy as drift and removing it on every plan.
 
-**Random suffixes for global uniqueness** — ACR, SQL Server, Redis, and Key Vault names require globally unique Azure names. A `random_string` suffix is appended to avoid collisions across deployments and forks.
+**Stable name suffixes per environment** — ACR, SQL Server, Redis, and Key Vault names require globally unique Azure names. Each environment declares a fixed `name_suffix` variable (e.g. `a9a6r3` for dev) so resource names are stable across destroy/re-apply cycles. Images pushed to ACR remain valid after a full infra rebuild.
 
 **Explicit `depends_on` on subnets and SQL DB** — Azure's control plane can return success on parent resource creation while child API calls briefly 404. Targeted `depends_on` was added only after observing transient failures in real applies — not as a blanket pattern.
 
