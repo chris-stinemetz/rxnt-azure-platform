@@ -1,4 +1,4 @@
-name: Deploy
+name: Prod — App Deploy
 
 on:
   push:
