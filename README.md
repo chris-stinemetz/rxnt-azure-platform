@@ -255,6 +255,11 @@ helm upgrade --install marketing-site helm/marketing-site \
   --set keyVault.csiClientId=$CSI_CLIENT
 ```
 
+## Open Items
+
+- **SP least-privilege (prod bootstrap)** — `User Access Administrator` is scoped to `rxnt-marketing-rg-dev` for dev. For prod, the role assignment can't be pre-scoped to the resource group before it exists. Remediation: pre-create the prod resource group, add the scoped assignment, then `terraform import` the group before the first apply. Until then, subscription-scope `User Access Administrator` is required as a one-time bootstrap.
+- **KEDA for time-window autoscaling** — HPA is in place with CPU-based scaling (50% target, 1–5 replicas). Adding KEDA with a cron scaler would pre-scale before the 10am–8pm EST traffic window rather than reacting to it after the fact.
+
 ## Design Decisions
 
 **AKS over Container Apps** — AKS demonstrates deeper Kubernetes/infrastructure expertise and supports the autoscaling requirement (10am–8pm EST traffic pattern) via VMSS node pools and HPA.

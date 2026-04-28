@@ -1,4 +1,4 @@
-name: Terraform
+name: Prod — Infra Plan / Apply
 
 on:
   push:
