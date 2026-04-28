@@ -3,14 +3,18 @@ name: App — Build Images
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
       image_tag:
         description: "Image tag (e.g. latest, git SHA)"
         required: false
         default: "latest"
-
-env:
-  ACR_NAME: rxntmktdeva9a6r3acr
-  ACR_LOGIN_SERVER: rxntmktdeva9a6r3acr.azurecr.io
 
 jobs:
   build:
@@ -21,6 +25,16 @@ jobs:
       contents: read
 
     steps:
+      - name: Resolve ACR for environment
+        id: acr
+        run: |
+          case "${{ inputs.environment }}" in
+            prod) echo "name=rxntmktprdc7e2b4acr" >> $GITHUB_OUTPUT
+                  echo "login_server=rxntmktprdc7e2b4acr.azurecr.io" >> $GITHUB_OUTPUT ;;
+            *)    echo "name=rxntmktdeva9a6r3acr" >> $GITHUB_OUTPUT
+                  echo "login_server=rxntmktdeva9a6r3acr.azurecr.io" >> $GITHUB_OUTPUT ;;
+          esac
+
       - name: Checkout app source
         uses: actions/checkout@v4
         with:
@@ -34,18 +48,18 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Log in to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
+        run: az acr login --name ${{ steps.acr.outputs.name }}
 
       - name: Build and push site image
         run: |
           docker build --platform linux/amd64 \
             -f Dockerfile.site \
-            -t ${{ env.ACR_LOGIN_SERVER }}/site:${{ inputs.image_tag }} .
-          docker push ${{ env.ACR_LOGIN_SERVER }}/site:${{ inputs.image_tag }}
+            -t ${{ steps.acr.outputs.login_server }}/site:${{ inputs.image_tag }} .
+          docker push ${{ steps.acr.outputs.login_server }}/site:${{ inputs.image_tag }}
 
       - name: Build and push api image
         run: |
           docker build --platform linux/amd64 \
             -f Dockerfile.api \
-            -t ${{ env.ACR_LOGIN_SERVER }}/api:${{ inputs.image_tag }} .
-          docker push ${{ env.ACR_LOGIN_SERVER }}/api:${{ inputs.image_tag }}
+            -t ${{ steps.acr.outputs.login_server }}/api:${{ inputs.image_tag }} .
+          docker push ${{ steps.acr.outputs.login_server }}/api:${{ inputs.image_tag }}
