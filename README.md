@@ -4,18 +4,31 @@ Terraform infrastructure for deploying the [RXNT marketing site](https://github.
 
 ## Architecture
 
-```
-                        ┌─────────────────────────────────┐
-                        │        Azure (Central US)        │
-                        │                                  │
-   GitHub Actions  ───► │  ACR  ──►  App Service Plan     │
-   (build images)       │            ├─ site (container)   │
-                        │            └─ api  (container)   │
-   Local terraform ───► │                                  │
-   (dev deploys)        │  Azure SQL  ◄─ api               │
-                        │  Redis      ◄─ site              │
-                        │  Key Vault  ◄─ both              │
-                        └─────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph sources["Deployment"]
+        GHA["GitHub Actions\nbuild.yml"]
+        TF["Local Terraform\ndev only"]
+    end
+
+    subgraph azure["Azure — Central US"]
+        ACR["ACR"]
+        subgraph plan["App Service Plan"]
+            site["site"]
+            api["api"]
+        end
+        SQL[("Azure SQL")]
+        Redis[("Redis")]
+        KV["Key Vault"]
+    end
+
+    GHA -- "push images" --> ACR
+    TF --> azure
+    ACR --> plan
+    api --> SQL
+    site --> Redis
+    site --> KV
+    api --> KV
 ```
 
 **Two containerized services:**
