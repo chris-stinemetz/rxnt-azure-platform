@@ -14,36 +14,19 @@ variable "name_prefix" {
 }
 
 variable "unique_suffix" {
-  description = "Random suffix appended to globally unique resource names."
+  description = "Stable suffix appended to globally unique resource names."
   type        = string
 }
 
-variable "aks_nodes_subnet_id" {
-  description = "Subnet ID for the AKS node pool."
+variable "key_vault_name" {
+  description = "Key Vault name used to construct Key Vault reference strings in app settings."
   type        = string
 }
 
-variable "aks_node_count" {
-  description = "Node count for the AKS system node pool."
-  type        = number
-  default     = 1
-}
-
-variable "aks_node_vm_size" {
-  description = "VM size for AKS system node pool."
+variable "app_service_sku" {
+  description = "App Service Plan SKU. Standard (S1) or higher required for autoscaling."
   type        = string
-  default     = "Standard_D2s_v3"
-}
-
-variable "aks_dns_prefix" {
-  description = "DNS prefix for AKS cluster API endpoint."
-  type        = string
-}
-
-variable "aks_kubernetes_version" {
-  description = "Optional AKS Kubernetes version. Null uses provider default stable version."
-  type        = string
-  default     = null
+  default     = "S1"
 }
 
 variable "common_tags" {

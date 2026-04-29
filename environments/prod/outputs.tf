@@ -8,22 +8,27 @@ output "acr_login_server" {
   description = "ACR login server for docker push/pull operations."
 }
 
-output "aks_cluster_name" {
-  value       = module.compute.aks_cluster_name
-  description = "AKS cluster name."
-}
-
-output "aks_kubelet_identity_object_id" {
-  value       = module.compute.aks_kubelet_identity_object_id
-  description = "Object ID of AKS kubelet identity."
-}
-
 output "key_vault_name" {
   value       = module.data.key_vault_name
   description = "Key Vault name where application secrets are stored."
 }
 
-output "key_vault_secrets_provider_client_id" {
-  value       = module.compute.key_vault_secrets_provider_client_id
-  description = "Client ID of the CSI driver managed identity (referenced in SecretProviderClass)."
+output "api_app_name" {
+  value       = module.compute.api_app_name
+  description = "App Service name for the API web app."
+}
+
+output "site_app_name" {
+  value       = module.compute.site_app_name
+  description = "App Service name for the site web app."
+}
+
+output "site_url" {
+  value       = module.compute.site_url
+  description = "Public URL of the site web app."
+}
+
+output "api_url" {
+  value       = module.compute.api_url
+  description = "Public URL of the API web app."
 }

@@ -17,7 +17,7 @@ terraform {
     resource_group_name  = "rg-terraform-state"
     storage_account_name = "rxntterraformstate"
     container_name       = "tfstate"
-    key                  = "dev/terraform.tfstate"
+    key                  = "dev-appservice/terraform.tfstate"
   }
 }
 

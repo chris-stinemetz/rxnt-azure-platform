@@ -31,8 +31,8 @@ jobs:
           case "${{ inputs.environment }}" in
             prod) echo "name=rxntmktprdc7e2b4acr" >> $GITHUB_OUTPUT
                   echo "login_server=rxntmktprdc7e2b4acr.azurecr.io" >> $GITHUB_OUTPUT ;;
-            *)    echo "name=rxntmktdeva9a6r3acr" >> $GITHUB_OUTPUT
-                  echo "login_server=rxntmktdeva9a6r3acr.azurecr.io" >> $GITHUB_OUTPUT ;;
+            *)    echo "name=rxntmktdevb5k9m2acr" >> $GITHUB_OUTPUT
+                  echo "login_server=rxntmktdevb5k9m2acr.azurecr.io" >> $GITHUB_OUTPUT ;;
           esac
 
       - name: Checkout app source

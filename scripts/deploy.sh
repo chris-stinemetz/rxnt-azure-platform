@@ -8,7 +8,8 @@ set -euo pipefail
 # Prerequisites:
 #   - terraform applied for the target environment
 #   - az login / service principal env vars set
-#   - kubectl context pointing at the target cluster
+#
+# Set SKIP_BUILD=true to skip image build and push (images already in ACR)
 
 ENV="${1:-dev}"
 IMAGE_TAG="${2:-latest}"
@@ -16,14 +17,12 @@ SKIP_BUILD="${SKIP_BUILD:-false}"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TF_DIR="${REPO_DIR}/environments/${ENV}"
-K8S_DIR="${REPO_DIR}/k8s"
 
 echo "==> Reading Terraform outputs from ${TF_DIR}"
-export ACR=$(terraform -chdir="${TF_DIR}" output -raw acr_login_server)
-export KEY_VAULT_NAME=$(terraform -chdir="${TF_DIR}" output -raw key_vault_name)
-export KEY_VAULT_TENANT_ID=$(terraform -chdir="${TF_DIR}" output -raw tenant_id)
-export CSI_CLIENT_ID=$(terraform -chdir="${TF_DIR}" output -raw key_vault_secrets_provider_client_id)
-export IMAGE_TAG
+ACR=$(terraform -chdir="${TF_DIR}" output -raw acr_login_server)
+RG=$(terraform -chdir="${TF_DIR}" output -raw resource_group_name)
+API_APP=$(terraform -chdir="${TF_DIR}" output -raw api_app_name)
+SITE_APP=$(terraform -chdir="${TF_DIR}" output -raw site_app_name)
 
 if [[ "${SKIP_BUILD}" == "true" ]]; then
   echo "==> Skipping image build (SKIP_BUILD=true)"
@@ -39,21 +38,16 @@ else
   docker push "${ACR}/api:${IMAGE_TAG}"
 fi
 
-echo "==> Applying Kubernetes manifests"
-kubectl apply -f "${K8S_DIR}/namespace.yaml"
+echo "==> Deploying to App Service"
+az webapp config container set \
+  --name "${API_APP}" \
+  --resource-group "${RG}" \
+  --docker-image "${ACR}/api:${IMAGE_TAG}"
 
-envsubst < "${K8S_DIR}/secret-provider-class.yaml" | kubectl apply -f -
-envsubst < "${K8S_DIR}/api-deployment.yaml"        | kubectl apply -f -
-kubectl apply -f "${K8S_DIR}/api-service.yaml"
+az webapp config container set \
+  --name "${SITE_APP}" \
+  --resource-group "${RG}" \
+  --docker-image "${ACR}/site:${IMAGE_TAG}"
 
-envsubst < "${K8S_DIR}/site-deployment.yaml" | kubectl apply -f -
-kubectl apply -f "${K8S_DIR}/site-service.yaml"
-
-kubectl apply -f "${K8S_DIR}/hpa.yaml"
-
-echo "==> Waiting for rollout"
-kubectl rollout status deployment/api  -n marketing --timeout=120s
-kubectl rollout status deployment/site -n marketing --timeout=120s
-
-echo "==> Done. External IP:"
-kubectl get svc site -n marketing
+echo "==> Done."
+terraform -chdir="${TF_DIR}" output site_url

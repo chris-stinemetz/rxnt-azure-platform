@@ -8,22 +8,32 @@ output "acr_id" {
   description = "ACR resource ID."
 }
 
-output "aks_cluster_name" {
-  value       = azurerm_kubernetes_cluster.main.name
-  description = "AKS cluster name."
+output "api_app_name" {
+  value       = azurerm_linux_web_app.api.name
+  description = "App Service name for the API web app."
 }
 
-output "aks_kubelet_identity_object_id" {
-  value       = azurerm_kubernetes_cluster.main.kubelet_identity[0].object_id
-  description = "Object ID of AKS kubelet identity used for ACR pull."
+output "site_app_name" {
+  value       = azurerm_linux_web_app.site.name
+  description = "App Service name for the site web app."
 }
 
-output "key_vault_secrets_provider_client_id" {
-  value       = azurerm_kubernetes_cluster.main.key_vault_secrets_provider[0].secret_identity[0].client_id
-  description = "Client ID of the CSI driver managed identity (used in SecretProviderClass)."
+output "api_url" {
+  value       = "https://${azurerm_linux_web_app.api.default_hostname}"
+  description = "Public URL of the API web app."
 }
 
-output "key_vault_secrets_provider_object_id" {
-  value       = azurerm_kubernetes_cluster.main.key_vault_secrets_provider[0].secret_identity[0].object_id
-  description = "Object ID of the CSI driver managed identity (used for Key Vault access policy)."
+output "site_url" {
+  value       = "https://${azurerm_linux_web_app.site.default_hostname}"
+  description = "Public URL of the site web app."
+}
+
+output "api_principal_id" {
+  value       = azurerm_linux_web_app.api.identity[0].principal_id
+  description = "Principal ID of the API web app managed identity (used for Key Vault access policy)."
+}
+
+output "site_principal_id" {
+  value       = azurerm_linux_web_app.site.identity[0].principal_id
+  description = "Principal ID of the site web app managed identity (used for Key Vault access policy)."
 }

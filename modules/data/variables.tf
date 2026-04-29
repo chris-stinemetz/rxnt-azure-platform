@@ -29,11 +29,6 @@ variable "sql_admin_password" {
   sensitive   = true
 }
 
-variable "api_base_url" {
-  description = "Base URL the site uses to reach the API service."
-  type        = string
-}
-
 variable "common_tags" {
   description = "Tags applied to all taggable resources."
   type        = map(string)

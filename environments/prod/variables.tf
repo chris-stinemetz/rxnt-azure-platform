@@ -32,7 +32,7 @@ variable "location" {
 variable "resource_group_name" {
   description = "Resource group name for all prod infrastructure."
   type        = string
-  default     = "rxnt-marketing-rg-prod"
+  default     = "rxnt-marketing-rg-prod-as"
 }
 
 variable "name_prefix" {
@@ -53,58 +53,10 @@ variable "sql_admin_username" {
   default     = "rxntsqladmin"
 }
 
-variable "api_image_name" {
-  description = "Repository name for API image in ACR."
+variable "app_service_sku" {
+  description = "App Service Plan SKU. Standard (S1) or higher required for autoscaling."
   type        = string
-  default     = "api"
-}
-
-variable "api_image_tag" {
-  description = "Tag for API image in ACR."
-  type        = string
-  default     = "latest"
-}
-
-variable "site_image_name" {
-  description = "Repository name for site image in ACR."
-  type        = string
-  default     = "site"
-}
-
-variable "site_image_tag" {
-  description = "Tag for site image in ACR."
-  type        = string
-  default     = "latest"
-}
-
-variable "api_base_url" {
-  description = "Base URL the site uses to reach the API service."
-  type        = string
-  default     = "http://api.marketing.svc.cluster.local"
-}
-
-variable "aks_node_count" {
-  description = "Node count for the AKS system node pool."
-  type        = number
-  default     = 2
-}
-
-variable "aks_node_vm_size" {
-  description = "VM size for AKS system node pool."
-  type        = string
-  default     = "Standard_D2s_v3"
-}
-
-variable "aks_dns_prefix" {
-  description = "DNS prefix for AKS cluster API endpoint."
-  type        = string
-  default     = "rxntmktprd"
-}
-
-variable "aks_kubernetes_version" {
-  description = "Optional AKS Kubernetes version. Null uses provider default stable version."
-  type        = string
-  default     = null
+  default     = "S1"
 }
 
 variable "common_tags" {

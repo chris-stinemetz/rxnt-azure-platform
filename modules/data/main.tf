@@ -94,8 +94,3 @@ resource "azurerm_key_vault_secret" "db_connection_string" {
   key_vault_id = azurerm_key_vault.main.id
 }
 
-resource "azurerm_key_vault_secret" "marketing_api_base_url" {
-  name         = "marketing-api-base-url"
-  value        = var.api_base_url
-  key_vault_id = azurerm_key_vault.main.id
-}
