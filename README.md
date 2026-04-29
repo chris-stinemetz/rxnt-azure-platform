@@ -1,38 +1,21 @@
 # rxnt-azure-platform
 
-Terraform infrastructure for deploying the [RXNT marketing site](https://github.com/RXNT/site-mkt) to Azure Kubernetes Service. Designed as a reusable, production-grade template for containerized app deployments.
+Terraform infrastructure for deploying the [RXNT marketing site](https://github.com/RXNT/site-mkt) to Azure App Service. Designed as a reusable, production-grade template for containerized app deployments.
 
 ## Architecture
 
-```mermaid
-graph TD
-    subgraph sources["Deployment"]
-        TF["GitHub Actions\nterraform.yml"]
-        BUILD["GitHub Actions\nbuild.yml"]
-        CD["scripts/deploy.sh"]
-        DEV["Local Terraform\ndev only"]
-    end
-
-    subgraph azure["Azure — Central US"]
-        ACR["ACR"]
-        subgraph aks["AKS"]
-            site["site"]
-            api["api"]
-            CSI["CSI Driver"]
-        end
-        SQL[("Azure SQL")]
-        Redis[("Redis")]
-        KV["Key Vault"]
-    end
-
-    TF --> azure
-    DEV --> azure
-    BUILD -- "push images" --> ACR
-    CD --> aks
-    ACR --> aks
-    api --> SQL
-    site --> Redis
-    CSI -- "read secrets" --> KV
+```
+                        ┌─────────────────────────────────┐
+                        │        Azure (Central US)        │
+                        │                                  │
+   GitHub Actions  ───► │  ACR  ──►  App Service Plan     │
+   (build images)       │            ├─ site (container)   │
+                        │            └─ api  (container)   │
+   Local terraform ───► │                                  │
+   (dev deploys)        │  Azure SQL  ◄─ api               │
+                        │  Redis      ◄─ site              │
+                        │  Key Vault  ◄─ both              │
+                        └─────────────────────────────────┘
 ```
 
 **Two containerized services:**
@@ -46,33 +29,23 @@ graph TD
 
 | Resource | SKU | Notes |
 |----------|-----|-------|
-| AKS | `Standard_D2s_v3` nodes | VMSS node pool for autoscaling |
-| ACR | Basic | AKS pulls via kubelet managed identity — no registry credentials stored |
+| App Service Plan | S1 (Linux) | Shared by both apps; S1 required for autoscaling |
+| ACR | Basic | Apps pull via managed identity — no registry credentials stored |
 | Azure SQL | Basic DTU | |
 | Redis | Basic C0 | |
-| Key Vault | Standard | Stores all three connection strings |
-| VNet | `10.20.0.0/16` | AKS nodes `/23`, private endpoints `/24` |
+| Key Vault | Standard | Stores connection strings; accessed via Key Vault references |
 
 ## Repository Structure
 
 ```
 modules/
-  network/        VNet + subnets
   data/           SQL, Redis, Key Vault + secrets
-  compute/        AKS, ACR, AcrPull role assignment, CSI driver addon
+  compute/        ACR, App Service Plan, Web Apps, autoscale, AcrPull assignments
 environments/
-  dev/            Local apply — lightweight defaults (1 node)
-  prod/           GitHub Actions deploy on merge to main (2 nodes)
-k8s/
-  namespace.yaml            marketing namespace
-  secret-provider-class.yaml  CSI SecretProviderClass — syncs Key Vault secrets to K8s secret
-  api-deployment.yaml       API deployment (image, env vars, secrets-store volume mount)
-  api-service.yaml          ClusterIP — internal only
-  site-deployment.yaml      Site deployment (image, env vars, secrets-store volume mount)
-  site-service.yaml         LoadBalancer — external traffic
-  hpa.yaml                  HPA for both deployments (CPU 50%, 1–5 replicas)
+  dev/            Local apply — terraform.tfvars for SP creds
+  prod/           GitHub Actions deploy on merge to main (OIDC auth)
 scripts/
-  deploy.sh                 envsubst manifests, kubectl apply (set SKIP_BUILD=true to skip image build)
+  deploy.sh       Push container images to ACR, update App Service container config
 .github/
   workflows/
     terraform.yml          Plan on PR, apply on merge to main (infra)
@@ -93,7 +66,7 @@ scripts/
 az ad sp create-for-rbac --name rxnt-assessment-sp --role Contributor \
   --scopes /subscriptions/<subscription-id>
 
-# Grant User Access Administrator so Terraform can assign AcrPull to the kubelet identity
+# Grant User Access Administrator so Terraform can assign AcrPull to the web app identities
 az role assignment create \
   --assignee <sp-client-id> \
   --role "User Access Administrator" \
@@ -112,9 +85,6 @@ cp terraform.tfvars.example terraform.tfvars
 terraform init
 terraform plan
 terraform apply
-
-# Get AKS credentials after apply
-az aks get-credentials --resource-group rxnt-marketing-rg-dev --name rxntmktdev-aks
 ```
 
 Terraform automatically loads `terraform.tfvars` when it exists in the working directory — no `-var-file` flag needed.
@@ -125,7 +95,7 @@ Always run `terraform destroy` between test iterations to stay within free tier 
 
 Production deploys run automatically via GitHub Actions — `terraform plan` on every PR, `terraform apply` on merge to `main`. No secrets are stored in GitHub; authentication uses OIDC (Workload Identity Federation).
 
-No `terraform.tfvars` is used for prod. Auth comes from the three `ARM_*` environment variables set in GitHub Actions secrets, and all other variables have production defaults defined in `environments/prod/variables.tf`.
+No `terraform.tfvars` is used for prod. Auth comes from the `ARM_*` environment variables set in GitHub Actions secrets, and all other variables have production defaults defined in `environments/prod/variables.tf`.
 
 ### One-time setup
 
@@ -143,13 +113,9 @@ az storage account create \
 az storage container create --name tfstate --account-name rxntterraformstate
 ```
 
-The storage account is intentionally created in East US rather than Central US (the infrastructure region). This keeps it independent of the infrastructure it tracks — if you destroy or migrate an environment, the state is unaffected. It also lives in its own resource group (`rg-terraform-state`) outside of Terraform's management so `terraform destroy` can never touch it.
-
-Then uncomment the `backend "azurerm"` block in `environments/prod/providers.tf` and run `terraform init` once to migrate state.
+The storage account lives in its own resource group outside of Terraform's management so `terraform destroy` can never touch it.
 
 **2. Add federated credentials to the Service Principal**
-
-Three credentials are required — the OIDC subject claim differs between event types so a single credential cannot cover all cases.
 
 In the Azure Portal, navigate to **App registrations → rxnt-assessment-sp → Certificates & secrets → Federated credentials → Add credential** and add all three:
 
@@ -162,12 +128,6 @@ In the Azure Portal, navigate to **App registrations → rxnt-assessment-sp → 
 | Branch / Environment | — | `main` | `prod` |
 | Name | `github-actions-pr` | `github-actions-main` | `github-actions-environment-prod` |
 
-Leave Issuer and Audience at their defaults for all three.
-
-- **Pull request** — Plan job on PR events
-- **Branch (main)** — Plan job when re-run on a merged commit
-- **Environment (prod)** — Apply job running in the `prod` GitHub Environment after approval
-
 **3. Add GitHub Actions secrets**
 
 In your repo: **Settings → Secrets and variables → Actions → New repository secret**
@@ -178,13 +138,9 @@ In your repo: **Settings → Secrets and variables → Actions → New repositor
 | `AZURE_TENANT_ID` | Azure AD tenant ID |
 | `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
 
-No `client_secret` is needed — the federated credential handles authentication via OIDC token exchange.
-
 **4. Configure the prod environment with a required reviewer**
 
-In your repo: **Settings → Environments → New environment** → name it `prod` → add yourself (or a teammate) as a required reviewer.
-
-This creates a manual approval gate on the apply job — merging to main triggers the plan automatically, but apply pauses and waits for a human to approve before any infrastructure changes run.
+In your repo: **Settings → Environments → New environment** → name it `prod` → add yourself as a required reviewer.
 
 **5. Push to trigger the workflow**
 
@@ -192,72 +148,57 @@ The workflow runs on any push or PR that changes `environments/prod/**` or `modu
 
 On a **pull request**: the `Plan` job runs and posts the Terraform plan as a comment.
 
-On **merge to main**: the `Plan` job runs first, then the `Apply` job pauses for reviewer approval. Once approved, it applies the exact plan that was reviewed — not a fresh one.
+On **merge to main**: the `Plan` job runs first, then the `Apply` job pauses for reviewer approval.
 
 ## Destroying Infrastructure
 
-A separate manually-triggered workflow handles destroy so it can never run accidentally.
-
-**Actions → Terraform Destroy → Run workflow**, then:
+**Actions → Infra — Destroy → Run workflow**, then:
 
 1. Select the environment (`dev` or `prod`)
 2. Type `destroy` in the confirmation field
 3. Click **Run workflow**
 
-The job aborts immediately if the confirmation input is anything other than `destroy`.
-
-The `prod` environment required reviewer (configured in step 4 above) also applies here — a second person must approve before the destroy job executes against prod.
-
 ## Application Deployment
 
-Application deployment is a two-step process: build images in CI, then apply manifests to the cluster.
+Application deployment is a two-step process: build images in CI, then update the App Service container config.
 
 **Step 1 — Build images (GitHub Actions)**
 
 **Actions → App — Build Images → Run workflow**, select the target environment and image tag. This builds both images on native `linux/amd64` runners and pushes them to the environment's ACR. No local Docker required.
 
-**Step 2 — Apply manifests**
+**Step 2 — Deploy**
 
 ```bash
-# Get AKS credentials
-az aks get-credentials --resource-group rxnt-marketing-rg-dev --name rxntmktdev-aks
-
-# Apply manifests (images already in ACR from step 1)
+# Deploy (images already in ACR from step 1)
 SKIP_BUILD=true ./scripts/deploy.sh dev latest
 
 # Or build locally and deploy in one step (slow on Apple Silicon)
 ./scripts/deploy.sh dev latest
 ```
 
-`deploy.sh` reads `acr_login_server`, `key_vault_name`, `tenant_id`, and `key_vault_secrets_provider_client_id` from `terraform output`, runs `envsubst` to substitute values into the `k8s/` manifests, and applies them with `kubectl`. Nothing is hardcoded.
-
-The Kubernetes manifests in `k8s/` use plain YAML with `envsubst` placeholders for environment-specific values. No Helm or templating engine is required.
+`deploy.sh` reads `acr_login_server`, `resource_group_name`, `api_app_name`, and `site_app_name` from `terraform output` and runs `az webapp config container set` to update both apps. App Service pulls the new image and restarts automatically.
 
 ## Open Items
 
-- **SP least-privilege** — The SP currently holds subscription-scope `User Access Administrator` to allow Terraform to create the AcrPull role assignment on the kubelet identity. This can be tightened post-deploy by scoping the role to the resource group, or replaced with a subscription-scope ABAC condition limiting it to assigning only the AcrPull role (`7f951dda-4ed3-4680-a7ca-43fe172d538d`).
-- **KEDA for time-window autoscaling** — HPA is in place with CPU-based scaling (50% target, 1–5 replicas). Adding KEDA with a cron scaler would pre-scale before the 10am–8pm EST traffic window rather than reacting to it after the fact.
+- **SP least-privilege** — The SP holds subscription-scope `User Access Administrator` to allow Terraform to create AcrPull role assignments on the web app identities. Can be tightened post-deploy by scoping to the resource group or using an ABAC condition limiting assignment to only the AcrPull role.
+- **KEDA for time-window autoscaling** — CPU-based autoscale is in place (50% threshold, 1–5 instances). KEDA with a cron scaler would pre-scale before the 10am–8pm EST traffic window rather than reacting after the fact.
 
 ## Design Decisions
 
-**AKS over Container Apps** — AKS demonstrates deeper Kubernetes/infrastructure expertise and supports the autoscaling requirement (10am–8pm EST traffic pattern) via VMSS node pools and HPA.
+**App Service over AKS** — App Service matches the team's current operational expertise while still supporting containerized workloads, autoscaling, and managed identity auth. Lower operational overhead than a Kubernetes cluster.
 
-**AcrPull via kubelet managed identity** — AKS pulls images from ACR using a system-assigned identity and role assignment. No registry credentials are stored anywhere.
+**AcrPull via web app managed identity** — Each web app has a system-assigned identity with AcrPull on ACR. No registry credentials stored anywhere. `container_registry_use_managed_identity = true` in `site_config` enables this at the App Service level.
 
-**CSI driver for secret injection** — The Secrets Store CSI Driver addon on AKS syncs Key Vault secrets to a Kubernetes secret (`app-secrets`). Pods mount a secrets-store volume to trigger the sync, then reference env vars from the K8s secret. No secrets touch the filesystem or environment at build time.
+**Key Vault references in app settings** — Connection strings are stored in Key Vault and referenced in app settings using `@Microsoft.KeyVault(VaultName=...;SecretName=...)` syntax. App Service resolves these at runtime using the web app's managed identity — no secrets in Terraform state or environment variables.
 
-**CSI access policy in the environment, not the module** — The CSI driver creates its own user-assigned managed identity (distinct from the kubelet identity). Granting it a Key Vault access policy requires a reference to both `module.compute` and `module.data` outputs, so it lives in the environment `main.tf` to avoid circular module dependencies.
-
-**Plain K8s manifests with envsubst** — App manifests live in `k8s/` as plain YAML with `${VAR}` placeholders. `envsubst` substitutes environment-specific values (ACR login server, Key Vault name, CSI client ID) at deploy time, keeping the manifests readable and free of templating engine dependencies. `scripts/deploy.sh` reads all values from `terraform output` so nothing is hardcoded.
+**Key Vault access policies in the environment, not the module** — The web app managed identities are created in the compute module, but granting them Key Vault access requires referencing both `module.compute` and `module.data` outputs. This lives in the environment `main.tf` to avoid circular module dependencies.
 
 **OIDC for CI authentication** — GitHub Actions authenticates to Azure via Workload Identity Federation. No long-lived `client_secret` is stored in GitHub secrets; the federated credential is scoped to a specific repo and branch.
 
-**Key Vault access policy model** — RBAC authorization disabled; the SP gets a direct access policy with only the required secret permissions (`Get`, `List`, `Set`, `Delete`, `Recover`, `Purge`). The SP policy is defined inline on the Key Vault resource (required to bootstrap secret creation in the same module), while the CSI driver policy is a separate `azurerm_key_vault_access_policy` resource in the environment. `lifecycle { ignore_changes = [access_policy] }` on the Key Vault prevents Terraform from treating the externally-managed CSI policy as drift and removing it on every plan.
+**Stable name suffixes per environment** — ACR, SQL, Redis, and Key Vault names require globally unique Azure names. Each environment declares a fixed `name_suffix` variable so resource names are stable across destroy/re-apply cycles. Images pushed to ACR remain valid after a full infra rebuild.
 
-**Stable name suffixes per environment** — ACR, SQL Server, Redis, and Key Vault names require globally unique Azure names. Each environment declares a fixed `name_suffix` variable (e.g. `a9a6r3` for dev) so resource names are stable across destroy/re-apply cycles. Images pushed to ACR remain valid after a full infra rebuild.
-
-**Explicit `depends_on` on subnets and SQL DB** — Azure's control plane can return success on parent resource creation while child API calls briefly 404. Targeted `depends_on` was added only after observing transient failures in real applies — not as a blanket pattern.
+**Explicit `depends_on` on SQL DB** — Azure's control plane can return success on parent resource creation while child API calls briefly 404. Targeted `depends_on` was added only after observing transient failures in real applies.
 
 **Remote state in East US, infra in Central US** — State storage is independent of the infrastructure it tracks and lives in its own resource group (`rg-terraform-state`) outside Terraform's management, so `terraform destroy` can never touch it.
 
-**Region: Central US** — East US and East US 2 both failed for this subscription (AKS node SKU rejection + SQL `ProvisioningDisabled`). Central US passed both checks; West US 3 is a confirmed fallback.
+**Region: Central US** — East US and East US 2 both failed for this subscription (SKU rejection + SQL `ProvisioningDisabled`). Central US passed; West US 3 is a confirmed fallback.

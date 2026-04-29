@@ -42,12 +42,16 @@ echo "==> Deploying to App Service"
 az webapp config container set \
   --name "${API_APP}" \
   --resource-group "${RG}" \
-  --docker-image "${ACR}/api:${IMAGE_TAG}"
+  --container-image-name "${ACR}/api:${IMAGE_TAG}" \
+  --container-registry-url "https://${ACR}" \
+  --container-registry-use-managed-identity true
 
 az webapp config container set \
   --name "${SITE_APP}" \
   --resource-group "${RG}" \
-  --docker-image "${ACR}/site:${IMAGE_TAG}"
+  --container-image-name "${ACR}/site:${IMAGE_TAG}" \
+  --container-registry-url "https://${ACR}" \
+  --container-registry-use-managed-identity true
 
 echo "==> Done."
 terraform -chdir="${TF_DIR}" output site_url

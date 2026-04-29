@@ -34,6 +34,8 @@ resource "azurerm_linux_web_app" "api" {
   }
 
   site_config {
+    container_registry_use_managed_identity = true
+
     application_stack {
       docker_image_name   = "api:latest"
       docker_registry_url = "https://${azurerm_container_registry.main.login_server}"
@@ -43,7 +45,6 @@ resource "azurerm_linux_web_app" "api" {
   app_settings = {
     "ASPNETCORE_ENVIRONMENT"              = "Production"
     "DB_CONNECTION_STRING"                = "@Microsoft.KeyVault(VaultName=${var.key_vault_name};SecretName=db-connection-string)"
-    "acrUseManagedIdentityCreds"          = "true"
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
   }
 
@@ -61,6 +62,8 @@ resource "azurerm_linux_web_app" "site" {
   }
 
   site_config {
+    container_registry_use_managed_identity = true
+
     application_stack {
       docker_image_name   = "site:latest"
       docker_registry_url = "https://${azurerm_container_registry.main.login_server}"
@@ -71,7 +74,6 @@ resource "azurerm_linux_web_app" "site" {
     "ASPNETCORE_ENVIRONMENT"              = "Production"
     "REDIS_CONNECTION_STRING"             = "@Microsoft.KeyVault(VaultName=${var.key_vault_name};SecretName=redis-connection-string)"
     "MarketingApi__BaseUrl"               = "https://${local.api_app_name}.azurewebsites.net"
-    "acrUseManagedIdentityCreds"          = "true"
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
   }
 
